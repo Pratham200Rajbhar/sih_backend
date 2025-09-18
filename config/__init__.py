@@ -1,0 +1,1 @@
+# SafeHorizon API - Config Package
