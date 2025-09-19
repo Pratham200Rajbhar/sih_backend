@@ -9,13 +9,16 @@ from fastapi.middleware.cors import CORSMiddleware
 # Import custom modules
 from src.models import (
     TouristRegistration, LocationData, AlertCreate, AlertUpdate, GeofenceData,
-    TouristResponse, LocationResponse, AlertResponse, MLStatusResponse, MLAnalysis
+    TouristResponse, LocationResponse, AlertResponse, MLStatusResponse, MLAnalysis,
+    ComprehensiveTouristInfo, TouristSummary, AllTouristsResponse, LocationInfo, AlertInfo, 
+    TouristAnalytics, TouristSafetyStatus
 )
 from src.database import (
     init_csv_files, read_csv_safe, append_to_csv, update_csv_row, safe_json_convert
 )
 from src.geofencing import check_geofences
 from src.ml_engine import load_or_train_model, predict_anomaly, train_anomaly_model, force_retrain, get_ml_status, stop_auto_retrain_monitor
+from src.tourist_analytics import get_tourist_analytics, get_safety_status
 from config.settings import CSV_FILES, API_CONFIG, CORS_CONFIG, ML_CONFIG
 
 @asynccontextmanager
@@ -338,6 +341,308 @@ async def test_ml_prediction(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error in ML prediction: {str(e)}"
+        )
+
+# Tourist Information Endpoints
+
+@app.get("/tourists", response_model=AllTouristsResponse)
+async def get_all_tourists():
+    """Get summary information for all tourists"""
+    try:
+        tourists_df = read_csv_safe(CSV_FILES["tourists"])
+        locations_df = read_csv_safe(CSV_FILES["locations"])
+        alerts_df = read_csv_safe(CSV_FILES["alerts"])
+        
+        if len(tourists_df) == 0:
+            return AllTouristsResponse(
+                total_tourists=0,
+                tourists=[],
+                summary_stats={
+                    "total_locations": 0,
+                    "total_alerts": 0,
+                    "average_risk_score": 0.0,
+                    "safe_tourists": 0,
+                    "at_risk_tourists": 0,
+                    "emergency_tourists": 0
+                }
+            )
+        
+        tourist_summaries = []
+        total_locations = 0
+        total_alerts = 0
+        risk_scores = []
+        status_counts = {"SAFE": 0, "AT_RISK": 0, "EMERGENCY": 0, "UNKNOWN": 0, "MODERATE_RISK": 0}
+        
+        for _, tourist in tourists_df.iterrows():
+            tourist_id = tourist['id']
+            
+            # Get analytics and safety status
+            analytics = get_tourist_analytics(tourist_id)
+            safety_status = get_safety_status(tourist_id)
+            
+            # Create summary
+            summary = TouristSummary(
+                tourist_id=tourist_id,
+                name=tourist['name'],
+                phone=tourist['phone'],
+                safety_status=safety_status['current_status'],
+                total_locations=analytics['total_locations'],
+                total_alerts=analytics['total_alerts'],
+                last_seen=safety_status['last_seen'],
+                risk_score=analytics['risk_score']
+            )
+            tourist_summaries.append(summary)
+            
+            # Aggregate statistics
+            total_locations += analytics['total_locations']
+            total_alerts += analytics['total_alerts']
+            risk_scores.append(analytics['risk_score'])
+            status_counts[safety_status['current_status']] = status_counts.get(safety_status['current_status'], 0) + 1
+        
+        # Calculate summary statistics
+        avg_risk_score = sum(risk_scores) / len(risk_scores) if risk_scores else 0.0
+        
+        summary_stats = {
+            "total_locations": total_locations,
+            "total_alerts": total_alerts,
+            "average_risk_score": round(avg_risk_score, 3),
+            "safe_tourists": status_counts["SAFE"],
+            "at_risk_tourists": status_counts["AT_RISK"] + status_counts["MODERATE_RISK"],
+            "emergency_tourists": status_counts["EMERGENCY"],
+            "unknown_tourists": status_counts["UNKNOWN"]
+        }
+        
+        return AllTouristsResponse(
+            total_tourists=len(tourists_df),
+            tourists=tourist_summaries,
+            summary_stats=summary_stats
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving tourists: {str(e)}"
+        )
+
+@app.get("/tourist/{tourist_id}/info", response_model=ComprehensiveTouristInfo)
+async def get_tourist_comprehensive_info(tourist_id: str, include_all_data: bool = False):
+    """Get comprehensive information for a specific tourist"""
+    try:
+        # Load all data
+        tourists_df = read_csv_safe(CSV_FILES["tourists"])
+        locations_df = read_csv_safe(CSV_FILES["locations"])
+        alerts_df = read_csv_safe(CSV_FILES["alerts"])
+        
+        # Check if tourist exists
+        tourist_info = tourists_df[tourists_df['id'] == tourist_id]
+        if len(tourist_info) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Tourist {tourist_id} not found"
+            )
+        
+        tourist = tourist_info.iloc[0]
+        
+        # Get tourist-specific data
+        tourist_locations = locations_df[locations_df['tourist_id'] == tourist_id]
+        tourist_alerts = alerts_df[alerts_df['tourist_id'] == tourist_id]
+        
+        # Get analytics and safety status
+        analytics_data = get_tourist_analytics(tourist_id)
+        safety_status_data = get_safety_status(tourist_id)
+        
+        # Convert locations to model format
+        recent_locations = []
+        all_locations = []
+        
+        if len(tourist_locations) > 0:
+            # Sort by timestamp (most recent first)
+            sorted_locations = tourist_locations.sort_values('timestamp', ascending=False)
+            
+            for _, loc in sorted_locations.iterrows():
+                location_info = LocationInfo(
+                    id=str(loc['id']),
+                    lat=float(loc['lat']),
+                    lon=float(loc['lon']),
+                    timestamp=str(loc['timestamp']),
+                    speed_kmh=float(loc['speed_kmh']),
+                    in_geofence=int(loc['in_geofence']),
+                    label=str(loc['label'])
+                )
+                all_locations.append(location_info)
+                
+                # Keep only recent 10 for summary
+                if len(recent_locations) < 10:
+                    recent_locations.append(location_info)
+        
+        # Convert alerts to model format
+        recent_alerts = []
+        all_alerts = []
+        
+        if len(tourist_alerts) > 0:
+            sorted_alerts = tourist_alerts.sort_values('created_at', ascending=False)
+            
+            for _, alert in sorted_alerts.iterrows():
+                alert_info = AlertInfo(
+                    id=str(alert['id']),
+                    type=str(alert['type']),
+                    lat=float(alert['lat']),
+                    lon=float(alert['lon']),
+                    status=str(alert['status']),
+                    created_at=str(alert['created_at']),
+                    related_location_id=str(alert.get('related_location_id', '')) or None
+                )
+                all_alerts.append(alert_info)
+                
+                # Keep only recent 10 for summary
+                if len(recent_alerts) < 10:
+                    recent_alerts.append(alert_info)
+        
+        # Create comprehensive response
+        comprehensive_info = ComprehensiveTouristInfo(
+            # Basic Information
+            tourist_id=tourist_id,
+            name=str(tourist['name']),
+            phone=str(tourist['phone']),
+            trip_start=str(tourist['trip_start']),
+            trip_end=str(tourist['trip_end']),
+            registration_date=str(tourist.get('created_at', tourist['trip_start'])),
+            
+            # Safety Status
+            safety_status=TouristSafetyStatus(**safety_status_data),
+            
+            # Analytics
+            analytics=TouristAnalytics(**analytics_data),
+            
+            # Recent Data
+            recent_locations=recent_locations,
+            recent_alerts=recent_alerts,
+            
+            # All Data (if requested)
+            all_locations=all_locations if include_all_data else None,
+            all_alerts=all_alerts if include_all_data else None
+        )
+        
+        return comprehensive_info
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving tourist information: {str(e)}"
+        )
+
+@app.get("/tourist/{tourist_id}/analytics")
+async def get_tourist_analytics_only(tourist_id: str):
+    """Get detailed analytics for a specific tourist"""
+    try:
+        analytics = get_tourist_analytics(tourist_id)
+        safety_status = get_safety_status(tourist_id)
+        
+        return {
+            "tourist_id": tourist_id,
+            "analytics": analytics,
+            "safety_status": safety_status,
+            "generated_at": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error calculating analytics: {str(e)}"
+        )
+
+@app.get("/tourist/{tourist_id}/locations")
+async def get_tourist_locations(tourist_id: str, limit: Optional[int] = None):
+    """Get location history for a specific tourist"""
+    try:
+        locations_df = read_csv_safe(CSV_FILES["locations"])
+        tourist_locations = locations_df[locations_df['tourist_id'] == tourist_id]
+        
+        if len(tourist_locations) == 0:
+            return {
+                "tourist_id": tourist_id,
+                "total_locations": 0,
+                "locations": []
+            }
+        
+        # Sort by timestamp (most recent first)
+        sorted_locations = tourist_locations.sort_values('timestamp', ascending=False)
+        
+        # Apply limit if specified
+        if limit:
+            sorted_locations = sorted_locations.head(limit)
+        
+        locations_list = []
+        for _, loc in sorted_locations.iterrows():
+            locations_list.append({
+                "id": str(loc['id']),
+                "lat": float(loc['lat']),
+                "lon": float(loc['lon']),
+                "timestamp": str(loc['timestamp']),
+                "speed_kmh": float(loc['speed_kmh']),
+                "in_geofence": bool(loc['in_geofence']),
+                "label": str(loc['label'])
+            })
+        
+        return {
+            "tourist_id": tourist_id,
+            "total_locations": len(tourist_locations),
+            "showing": len(locations_list),
+            "locations": locations_list
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving locations: {str(e)}"
+        )
+
+@app.get("/tourist/{tourist_id}/alerts")
+async def get_tourist_alerts(tourist_id: str, status_filter: Optional[str] = None):
+    """Get alert history for a specific tourist"""
+    try:
+        alerts_df = read_csv_safe(CSV_FILES["alerts"])
+        tourist_alerts = alerts_df[alerts_df['tourist_id'] == tourist_id]
+        
+        # Apply status filter if specified
+        if status_filter:
+            tourist_alerts = tourist_alerts[tourist_alerts['status'] == status_filter.upper()]
+        
+        if len(tourist_alerts) == 0:
+            return {
+                "tourist_id": tourist_id,
+                "total_alerts": 0,
+                "alerts": []
+            }
+        
+        # Sort by created_at (most recent first)
+        sorted_alerts = tourist_alerts.sort_values('created_at', ascending=False)
+        
+        alerts_list = []
+        for _, alert in sorted_alerts.iterrows():
+            alerts_list.append({
+                "id": str(alert['id']),
+                "type": str(alert['type']),
+                "lat": float(alert['lat']),
+                "lon": float(alert['lon']),
+                "status": str(alert['status']),
+                "created_at": str(alert['created_at']),
+                "related_location_id": str(alert.get('related_location_id', '')) or None
+            })
+        
+        return {
+            "tourist_id": tourist_id,
+            "total_alerts": len(sorted_alerts),
+            "status_filter": status_filter,
+            "alerts": alerts_list
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving alerts: {str(e)}"
         )
 
 if __name__ == "__main__":

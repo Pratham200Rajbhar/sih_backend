@@ -265,7 +265,345 @@ fetch('http://localhost:8000/geofences', {
 
 ---
 
-## 🔧 Frontend Integration Examples
+## � Tourist Information Endpoints
+
+### 9. 📊 Get All Tourists Summary
+**GET** `/tourists`
+
+Retrieve summary information for all tourists in the system.
+
+```javascript
+// Request
+fetch('http://localhost:8000/tourists')
+
+// Response
+{
+  "total_tourists": 12,
+  "tourists": [
+    {
+      "tourist_id": "116e10c8-2534-4414-9393-401863d46409",
+      "name": "Aarav Singh",
+      "phone": "700001001",
+      "safety_status": "SAFE",
+      "total_locations": 15,
+      "total_alerts": 2,
+      "last_seen": "2025-09-19T10:30:00Z",
+      "risk_score": 0.23
+    },
+    {
+      "tourist_id": "bbbadb9d-d26f-4136-9deb-492fd9055509",
+      "name": "Meera Khan",
+      "phone": "700001002",
+      "safety_status": "AT_RISK",
+      "total_locations": 8,
+      "total_alerts": 5,
+      "last_seen": "2025-09-19T09:15:00Z",
+      "risk_score": 0.78
+    }
+  ],
+  "summary_stats": {
+    "total_locations": 156,
+    "total_alerts": 24,
+    "average_risk_score": 0.345,
+    "safe_tourists": 8,
+    "at_risk_tourists": 3,
+    "emergency_tourists": 1,
+    "unknown_tourists": 0
+  }
+}
+```
+
+### 10. 🔍 Get Comprehensive Tourist Information
+**GET** `/tourist/{tourist_id}/info`
+
+Get detailed information about a specific tourist including analytics, safety status, recent activity, and optionally all historical data.
+
+```javascript
+// Request (basic info)
+fetch('http://localhost:8000/tourist/116e10c8-2534-4414-9393-401863d46409/info')
+
+// Request (with all historical data)
+fetch('http://localhost:8000/tourist/116e10c8-2534-4414-9393-401863d46409/info?include_all_data=true')
+
+// Response
+{
+  "tourist_id": "116e10c8-2534-4414-9393-401863d46409",
+  "name": "Aarav Singh",
+  "phone": "700001001",
+  "trip_start": "2025-09-18",
+  "trip_end": "2025-09-21",
+  "registration_date": "2025-09-18",
+  
+  "safety_status": {
+    "current_status": "SAFE",
+    "last_seen": "2025-09-19T10:30:00Z",
+    "current_location": {
+      "id": "loc_123",
+      "lat": 28.6139,
+      "lon": 77.2090,
+      "timestamp": "2025-09-19T10:30:00Z",
+      "speed_kmh": 35.0,
+      "in_geofence": 1,
+      "label": "normal"
+    },
+    "active_alerts": 0,
+    "days_since_registration": 1
+  },
+  
+  "analytics": {
+    "total_locations": 15,
+    "total_alerts": 2,
+    "anomaly_locations": 1,
+    "normal_locations": 14,
+    "average_speed": 42.3,
+    "max_speed": 85.0,
+    "min_speed": 5.0,
+    "geofence_violations": 2,
+    "sos_alerts": 1,
+    "ml_alerts": 1,
+    "first_location": "2025-09-18T14:00:00Z",
+    "last_location": "2025-09-19T10:30:00Z",
+    "total_distance_km": 12.5,
+    "risk_score": 0.23
+  },
+  
+  "recent_locations": [
+    {
+      "id": "loc_123",
+      "lat": 28.6139,
+      "lon": 77.2090,
+      "timestamp": "2025-09-19T10:30:00Z",
+      "speed_kmh": 35.0,
+      "in_geofence": 1,
+      "label": "normal"
+    }
+    // ... up to 10 most recent locations
+  ],
+  
+  "recent_alerts": [
+    {
+      "id": "alert_001",
+      "type": "SOS",
+      "lat": 28.6100,
+      "lon": 77.2050,
+      "status": "RESOLVED",
+      "created_at": "2025-09-18T16:30:00Z",
+      "related_location_id": "loc_098"
+    }
+    // ... up to 10 most recent alerts
+  ]
+  
+  // Optional: all_locations and all_alerts arrays if include_all_data=true
+}
+```
+
+**Query Parameters:**
+- `include_all_data`: Include complete location and alert history (default: false)
+
+### 11. 📈 Get Tourist Analytics Only
+**GET** `/tourist/{tourist_id}/analytics`
+
+Get detailed analytics and safety assessment for a tourist.
+
+```javascript
+// Request
+fetch('http://localhost:8000/tourist/116e10c8-2534-4414-9393-401863d46409/analytics')
+
+// Response
+{
+  "tourist_id": "116e10c8-2534-4414-9393-401863d46409",
+  "analytics": {
+    "total_locations": 15,
+    "total_alerts": 2,
+    "anomaly_locations": 1,
+    "normal_locations": 14,
+    "average_speed": 42.3,
+    "max_speed": 85.0,
+    "min_speed": 5.0,
+    "geofence_violations": 2,
+    "sos_alerts": 1,
+    "ml_alerts": 1,
+    "first_location": "2025-09-18T14:00:00Z",
+    "last_location": "2025-09-19T10:30:00Z",
+    "total_distance_km": 12.5,
+    "risk_score": 0.23
+  },
+  "safety_status": {
+    "current_status": "SAFE",
+    "last_seen": "2025-09-19T10:30:00Z",
+    "current_location": { /* location object */ },
+    "active_alerts": 0,
+    "days_since_registration": 1
+  },
+  "generated_at": "2025-09-19T11:00:00Z"
+}
+```
+
+### 12. 📍 Get Tourist Location History
+**GET** `/tourist/{tourist_id}/locations`
+
+Retrieve location history for a specific tourist.
+
+```javascript
+// Request (all locations)
+fetch('http://localhost:8000/tourist/116e10c8-2534-4414-9393-401863d46409/locations')
+
+// Request (limit to 20 most recent)
+fetch('http://localhost:8000/tourist/116e10c8-2534-4414-9393-401863d46409/locations?limit=20')
+
+// Response
+{
+  "tourist_id": "116e10c8-2534-4414-9393-401863d46409",
+  "total_locations": 15,
+  "showing": 15,
+  "locations": [
+    {
+      "id": "loc_123",
+      "lat": 28.6139,
+      "lon": 77.2090,
+      "timestamp": "2025-09-19T10:30:00Z",
+      "speed_kmh": 35.0,
+      "in_geofence": true,
+      "label": "normal"
+    },
+    {
+      "id": "loc_122",
+      "lat": 28.6135,
+      "lon": 77.2085,
+      "timestamp": "2025-09-19T10:25:00Z",
+      "speed_kmh": 38.0,
+      "in_geofence": true,
+      "label": "normal"
+    }
+    // ... more locations (sorted by timestamp, most recent first)
+  ]
+}
+```
+
+**Query Parameters:**
+- `limit`: Maximum number of locations to return (optional)
+
+### 13. 🚨 Get Tourist Alert History
+**GET** `/tourist/{tourist_id}/alerts`
+
+Retrieve alert history for a specific tourist.
+
+```javascript
+// Request (all alerts)
+fetch('http://localhost:8000/tourist/116e10c8-2534-4414-9393-401863d46409/alerts')
+
+// Request (only open alerts)
+fetch('http://localhost:8000/tourist/116e10c8-2534-4414-9393-401863d46409/alerts?status_filter=OPEN')
+
+// Response
+{
+  "tourist_id": "116e10c8-2534-4414-9393-401863d46409",
+  "total_alerts": 2,
+  "status_filter": null,
+  "alerts": [
+    {
+      "id": "alert_002",
+      "type": "ML",
+      "lat": 28.6120,
+      "lon": 77.2070,
+      "status": "OPEN",
+      "created_at": "2025-09-19T09:45:00Z",
+      "related_location_id": "loc_115"
+    },
+    {
+      "id": "alert_001",
+      "type": "SOS",
+      "lat": 28.6100,
+      "lon": 77.2050,
+      "status": "RESOLVED",
+      "created_at": "2025-09-18T16:30:00Z",
+      "related_location_id": "loc_098"
+    }
+    // ... more alerts (sorted by created_at, most recent first)
+  ]
+}
+```
+
+**Query Parameters:**
+- `status_filter`: Filter by alert status (`OPEN`, `RESOLVED`, `CLOSED`)
+
+---
+
+## 🤖 Machine Learning Endpoints
+
+### 14. 📊 Get ML Model Status
+**GET** `/ml/status`
+
+Check the status of the machine learning model and auto-retraining system.
+
+```javascript
+// Request
+fetch('http://localhost:8000/ml/status')
+
+// Response
+{
+  "model_loaded": true,
+  "auto_retrain_enabled": true,
+  "monitor_running": true,
+  "last_training": "2025-09-19T01:35:25.146111"
+}
+```
+
+### 15. 🔄 Force ML Model Retraining
+**POST** `/ml/retrain`
+
+Manually trigger machine learning model retraining.
+
+```javascript
+// Request
+fetch('http://localhost:8000/ml/retrain', {
+  method: 'POST'
+})
+
+// Response
+{
+  "status": "success",
+  "message": "ML model retrained successfully",
+  "timestamp": "2025-09-19T11:00:00Z"
+}
+```
+
+### 16. 🎯 Test ML Prediction
+**POST** `/ml/predict`
+
+Test machine learning anomaly prediction with custom parameters.
+
+```javascript
+// Request
+fetch('http://localhost:8000/ml/predict?speed_kmh=120&in_geofence=0&lat=28.6&lon=77.2', {
+  method: 'POST'
+})
+
+// Response
+{
+  "prediction": {
+    "is_anomaly": true,
+    "confidence": 0.112,
+    "score": -0.112
+  },
+  "parameters": {
+    "speed_kmh": 120.0,
+    "in_geofence": false,
+    "lat": 28.6,
+    "lon": 77.2
+  }
+}
+```
+
+**Query Parameters:**
+- `speed_kmh`: Speed in km/h (default: 50.0)
+- `in_geofence`: Whether inside geofence (0 or 1, default: 0)
+- `lat`: Latitude (optional)
+- `lon`: Longitude (optional)
+
+---
+
+## �🔧 Frontend Integration Examples
 
 ### React Hook for Location Tracking
 
